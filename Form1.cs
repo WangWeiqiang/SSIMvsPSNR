@@ -119,7 +119,7 @@ namespace SSIMvsPSNR
             {
                 double l = GetSSIMLuminance(x[i], y[i]);
                 double c = GetSSIMContrast(x[i], y[i]);
-                double s=GetSSIMStructural(x[i], y[i]);
+                double s = GetSSIMStructural(x[i], y[i]);
                 SSIM += (l * c * s);
             }
             SSIM = SSIM / x.Count();
@@ -187,7 +187,7 @@ namespace SSIMvsPSNR
             double v = 0;
             double xVariance=GetVariance(x);
             double yVariance=GetVariance(y);
-            v=(2 * Math.Sqrt(xVariance * yVariance) + C2) / (xVariance + yVariance + C2);
+            v = (2 * xVariance * yVariance + C2) / (xVariance * xVariance + yVariance * yVariance + C2);
             return v;
         }
 
@@ -197,7 +197,7 @@ namespace SSIMvsPSNR
             double co = GetCovariance(x, y);
             double vx = GetVariance(x);
             double vy = GetVariance(y);
-            v = co + C3 / (vx * vy + C3);
+            v = (co + C3) / (vx * vy + C3);
             return v;
         }
 
@@ -256,7 +256,7 @@ namespace SSIMvsPSNR
                 }
             }
 
-            return v / (bitmap.Width*bitmap.Height);
+            return Math.Sqrt(v / (bitmap.Width * bitmap.Height));
         }
 
         
