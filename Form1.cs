@@ -1,97 +1,197 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
-using System.Text;
+using System.Threading;
 using System.Windows.Forms;
-
+using System.Windows.Forms.DataVisualization.Charting;
+using ILNumerics.Data;
 namespace SSIMvsPSNR
 {
-    public partial class Form1 : Form
+    public partial class MainForm : Form
     {
         const double C1=1,C2=1,C3=1;
-        
-        int flag = 1;
-        public Form1()
+        Task task;
+        Thread uiThread = null;
+        string distortionType = "blur";
+
+        public MainForm()
         {
             InitializeComponent();
         }
 
-        private void openFileDialog_FileOk(object sender, CancelEventArgs e)
+        private void updateUI(PictureBox p, Chart chart)
         {
-            var fileImage = openFileDialog.FileName;
-            if (flag == 1)
-            {
-                OriginalImage.Load(fileImage);
-            }
-            if (flag == 2)
-            {
-                compressedImage.Load(fileImage);
-            }
+            flowLayoutPanel.Controls.Add(p);
+            flowLayoutPanel.Controls.Add(chart);
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private void ScanCompute()
         {
-            //before processing image into 8x8 blocks, need to make the width and height of images is integral multiple of 8
-            //then cut the images into 8x8 blocks and save them into array.
-            Bitmap bm =(Bitmap)OriginalImage.Image;
-            Bitmap originalBitMap   = new Bitmap(OriginalImage.Image);
-            Bitmap compressedBitMap = new Bitmap(compressedImage.Image);
-            int width = OriginalImage.Image.Width;
-            int height = OriginalImage.Image.Height;
 
-            int modW = width % 8;
-            int modH = height % 8;
-            int newWidth=width;
-            if (modW > 0)
+            foreach (TaskGroup g in task.TaskGroups)
             {
-                newWidth = width + (8 - modW);
-            }
-            
-            int newHeight=height;
-            if (modH > 0)
-            {
-                newHeight = height + (8 - modH);
-            }
+                PictureBox p = new PictureBox();
+                p.Width=252;
+                p.Height = 142;
+                p.Load(g.OriginalImageFileName);
+                p.SizeMode = PictureBoxSizeMode.StretchImage;
+                OriginalImage.Load(g.OriginalImageFileName);
+                p.Show();
 
+                ChartArea chartArea1 = new ChartArea();
+                chartArea1.Name="ChartArea1";
+                Legend legend1 = new Legend();
+                legend1.Name = "Legend1";
+                Series series1 = new Series();
+                Series series2 = new Series();
+                Chart chart = new Chart();
+                chart.ChartAreas.Add(chartArea1);
+                chart.Legends.Add(legend1);
+                
+                series1.ChartArea = "ChartArea1";
+                series1.Legend = "Legend1";
+                series1.Name = "PSNR";
+                series1.ChartType = SeriesChartType.Line;
 
-            Bitmap newOrBitmap = new Bitmap(newWidth,newHeight);
-            Bitmap newPrBitmap = new Bitmap(newWidth, newHeight);
-            Graphics graphicOrImage = Graphics.FromImage(newOrBitmap);
-            Graphics graphicPrImage = Graphics.FromImage(newPrBitmap);
-            graphicOrImage.DrawImage(originalBitMap, 0, 0, width, height);
-            graphicPrImage.DrawImage(compressedBitMap, 0, 0, width, height);
+                series2.ChartArea = "ChartArea1";
+                series2.Legend = "Legend1";
+                series2.Name = "SSIM";
+                series2.ChartType = SeriesChartType.Line;
+                chart.Series.Add(series1);
+                chart.Series.Add(series2);
+                chart.Size = new System.Drawing.Size(375, 142);
 
-            List<Bitmap> orBlockArray = new List<Bitmap>();
-            List<Bitmap> prBlockArray = new List<Bitmap>();
+                chart.Show();
 
-            for (int i = 0; i < newWidth / 8; i++)
-            {
-                for (int j = 0; j < newHeight / 8; j++)
+                foreach (TaskItem item in g.TaskItems)
                 {
-                    Bitmap orBlock = new Bitmap(8, 8);
-                    orBlock = Cut(newOrBitmap, i * 8, j * 8, 8, 8);
-                    orBlockArray.Add(orBlock);
+                    double distortionLevel = 0;
+                    bool doProcess = false;
+                    switch (distortionType)
+                    {
+                        case "blur":
+                            doProcess = (item.BlurLevel > 0 && item.JpegLevel == 0 && item.NoiseLevel == 0);
+                            distortionLevel = item.BlurLevel;
+                            break;
+                        case "noise":
+                            doProcess = (item.NoiseLevel > 0 && item.JpegLevel == 0 && item.BlurLevel == 0);
+                            distortionLevel = item.NoiseLevel;
+                            break;
+                        case "jpeg":
+                            doProcess = (item.JpegLevel > 0 && item.NoiseLevel== 0 && item.BlurLevel == 0);
+                            distortionLevel = item.JpegLevel;
+                            break;
+                        case "blur_jpeg":
+                            doProcess = (item.JpegLevel > 0 && item.BlurLevel > 0 && item.NoiseLevel == 0);
+                            distortionLevel = (double)(item.JpegLevel + item.BlurLevel) / 2;
+                            break;
+                        case "blur_noise":
+                            doProcess = (item.BlurLevel > 0 && item.NoiseLevel > 0 && item.JpegLevel == 0);
+                            distortionLevel = (double)(item.BlurLevel + item.NoiseLevel) / 2;
+                            break;
+                    }
+                    if (doProcess)
+                    {
+                        compressedImage.Load(item.FileName);
 
-                    Bitmap prBlock = new Bitmap(8, 8);
-                    prBlock = Cut(newPrBitmap, i * 8, j * 8, 8, 8);
-                    prBlockArray.Add(prBlock);
+                        Bitmap bm = (Bitmap)OriginalImage.Image;
+                        Bitmap originalBitMap = new Bitmap(OriginalImage.Image);
+                        Bitmap compressedBitMap = new Bitmap(compressedImage.Image);
+                        int width = OriginalImage.Image.Width;
+                        int height = OriginalImage.Image.Height;
+
+                        int modW = width % 8;
+                        int modH = height % 8;
+                        int newWidth = width;
+                        if (modW > 0)
+                        {
+                            newWidth = width + (8 - modW);
+                        }
+
+                        int newHeight = height;
+                        if (modH > 0)
+                        {
+                            newHeight = height + (8 - modH);
+                        }
+
+
+                        Bitmap newOrBitmap = new Bitmap(newWidth, newHeight);
+                        Bitmap newPrBitmap = new Bitmap(newWidth, newHeight);
+                        Graphics graphicOrImage = Graphics.FromImage(newOrBitmap);
+                        Graphics graphicPrImage = Graphics.FromImage(newPrBitmap);
+                        graphicOrImage.DrawImage(originalBitMap, 0, 0, width, height);
+                        graphicPrImage.DrawImage(compressedBitMap, 0, 0, width, height);
+
+                        List<Bitmap> orBlockArray = new List<Bitmap>();
+                        List<Bitmap> prBlockArray = new List<Bitmap>();
+
+                        for (int i = 0; i < newWidth / 8; i++)
+                        {
+                            for (int j = 0; j < newHeight / 8; j++)
+                            {
+                                Bitmap orBlock = new Bitmap(8, 8);
+                                orBlock = Cut(newOrBitmap, i * 8, j * 8, 8, 8);
+                                orBlockArray.Add(orBlock);
+
+                                Bitmap prBlock = new Bitmap(8, 8);
+                                prBlock = Cut(newPrBitmap, i * 8, j * 8, 8, 8);
+                                prBlockArray.Add(prBlock);
+                            }
+                        }
+                        //end preparing images
+                        double PSNR = GetPSNR(orBlockArray, prBlockArray);
+                        double SSIM = GetSSIM(orBlockArray, prBlockArray) * 100;
+                        
+
+                        chart.Series["PSNR"].Points.Add(new System.Windows.Forms.DataVisualization.Charting.DataPoint(distortionLevel, PSNR));
+                        chart.Series["SSIM"].Points.Add(new System.Windows.Forms.DataVisualization.Charting.DataPoint(distortionLevel, SSIM));
+                    }
                 }
+                chart.Series["PSNR"].Sort(PointSortOrder.Ascending);
+                chart.Series["SSIM"].Sort(PointSortOrder.Ascending);
+                
+                this.Invoke(new Action<PictureBox, Chart>(this.updateUI), p, chart);
+                this.Invoke(new Action(this.UpdateProcessThread));
+                g.Done = true;
             }
-            //end preparing images
+            uiThread.Abort();
+
+        }
+
+        private void UpdateProcessThread()
+        {
+            Thread.Sleep(1000);
+
+            int groupDone = 1;
 
 
-            double PSNR = GetPSNR(orBlockArray, prBlockArray);
-            PSNRValue.Text = PSNR.ToString();
+            foreach (TaskGroup g in task.TaskGroups)
+            {
+                if (g.Done)
+                    groupDone++;
+            }
 
-            double SSIM = GetSSIM(orBlockArray, prBlockArray);
-
-            SSIMvalue.Text = SSIM.ToString();
+            this.Invoke(new Action<int>(this.UpdateProcess), groupDone);
             
+        }
+
+        private void UpdateProcess(int v)
+        {
+            this.progressBar.Value = v;
+        }
+
+        private void bt_Compute_Click(object sender, EventArgs e)
+        {
+            uiThread = new Thread(new ThreadStart(this.UpdateProcessThread));
+            uiThread.IsBackground = true;
+            uiThread.Start();
+
+            Thread workThread = new Thread(new ThreadStart(this.ScanCompute));
+            workThread.Start();
+
         }
 
         private double GetPSNR(List<Bitmap> x, List<Bitmap> y)
@@ -103,12 +203,17 @@ namespace SSIMvsPSNR
             }
 
             MSE = MSE / x.Count();
-            if (MSE == 0)
+
+            
+            double PSNR;
+            if (MSE > 0)
             {
-                MSE = 1;
+                PSNR = 20 * Math.Log10(255) - 10 * Math.Log10(MSE);
             }
-            MSEValue.Text = MSE.ToString();
-            double PSNR = 10 * Math.Log10((255 * 255) / MSE);
+            else
+            {
+                PSNR = 20 * Math.Log10(255);
+            }
             return PSNR;
         }
 
@@ -156,18 +261,6 @@ namespace SSIMvsPSNR
 
             MSE = (xLuminance - yLuminance)*(xLuminance - yLuminance);
             return MSE;
-        }
-
-        private void button2_Click(object sender, EventArgs e)
-        {
-            flag = 1;
-            DialogResult fileDialog = openFileDialog.ShowDialog();
-        }
-
-        private void button3_Click(object sender, EventArgs e)
-        {
-            flag = 2;
-            DialogResult fileDialog = openFileDialog.ShowDialog();
         }
 
         private double GetSSIMLuminance(Bitmap x, Bitmap y)
@@ -327,6 +420,125 @@ namespace SSIMvsPSNR
             }
 
             return v/(x.Height*x.Width);
+        }
+
+        private void btBrowseFolder_Click(object sender, EventArgs e)
+        {
+            if (folderBrowserDialog.ShowDialog() == DialogResult.OK)
+            {
+                task = new Task();
+                task.TaskGroups = new List<TaskGroup>();
+
+                this.folderName.Text = folderBrowserDialog.SelectedPath;
+                string[] files=Directory.GetFiles(this.folderName.Text);
+                ILNumerics.ILMatFile x = new ILNumerics.ILMatFile("D:\\NTU Course\\Multiple Media Management\\To_Release\\Part 2\\Imagelists.mat");
+                
+                
+                foreach (var file in files)
+                {
+                    var imgfilename = file.Replace(this.folderName.Text+"\\", "").Replace(".bmp", "");
+                    if (imgfilename.IndexOf("_") < 0)
+                    {
+                        TaskGroup g = new TaskGroup();
+                        g.GroupName = imgfilename;
+                        g.OriginalImageFileName = file;
+                        g.TaskItems = new List<TaskItem>();
+                        task.TaskGroups.Add(g);
+                    }
+                    else
+                    {
+                        string[] processfilename = imgfilename.Split('_');
+
+                        foreach (var g in task.TaskGroups)
+                        {
+                            if (g.GroupName == processfilename[0])
+                            {
+                                TaskItem item = new TaskItem();
+                                item.FileName = file;
+                                if (processfilename[1].IndexOf("blur") >= 0)
+                                {
+                                    item.BlurLevel = int.Parse(processfilename[1].Replace("blur", ""));
+                                }
+                                if (processfilename[1].IndexOf("jpeg") >= 0)
+                                {
+                                    item.JpegLevel = int.Parse(processfilename[1].Replace("jpeg", ""));
+                                }
+                                if (processfilename[1].IndexOf("noise") >= 0)
+                                {
+                                    item.NoiseLevel = int.Parse(processfilename[1].Replace("noise", ""));
+                                }
+
+                                if (processfilename.Length > 2)
+                                {
+                                    if (processfilename[2].IndexOf("blur") >= 0)
+                                    {
+                                        item.BlurLevel = int.Parse(processfilename[2].Replace("blur", ""));
+                                    }
+                                    if (processfilename[2].IndexOf("jpeg") >= 0)
+                                    {
+                                        item.JpegLevel = int.Parse(processfilename[2].Replace("jpeg", ""));
+                                    }
+                                    if (processfilename[2].IndexOf("noise") >= 0)
+                                    {
+                                        item.NoiseLevel = int.Parse(processfilename[2].Replace("noise", ""));
+                                    }
+                                }
+
+                                g.TaskItems.Add(item);
+                            }
+                        }
+                    }
+                }
+
+                int taskcount=task.TaskGroups.Count();
+                if (taskcount > 0)
+                {
+                    progressBar.Maximum = taskcount;
+                    bt_Compute.Enabled = true;
+                }
+
+            }
+        }
+
+        private void radioButton_Blur_CheckedChanged(object sender, EventArgs e)
+        {
+            distortionType = "blur";
+            ResetProcess();
+        }
+
+        private void radioButton_Noise_CheckedChanged(object sender, EventArgs e)
+        {
+            distortionType = "noise";
+            ResetProcess();
+        }
+
+        private void radioButton_Jpeg_CheckedChanged(object sender, EventArgs e)
+        {
+            distortionType = "jpeg";
+            ResetProcess();
+        }
+
+        private void radioButton_Blur_Noise_CheckedChanged(object sender, EventArgs e)
+        {
+            distortionType = "blur_noise";
+            ResetProcess();
+        }
+
+        private void radioButton_Blur_Jpeg_CheckedChanged(object sender, EventArgs e)
+        {
+            distortionType = "blur_jpeg";
+            ResetProcess();
+        }
+
+        private void ResetProcess()
+        {
+            if (task != null)
+            {
+                foreach (TaskGroup g in task.TaskGroups)
+                {
+                    g.Done = false;
+                }
+            }
         }
     }
 }
